@@ -41,7 +41,9 @@ var SubTile = ee.FeatureCollection("users/agrosatelite_mapbiomas/COLECAO_7/GRIDS
 
 var outputCollection = 'users/your_username/MAPBIOMAS/C7/FOREST_PLANTATION/RESULTS/RAW/'
 
-var year = 2014
+var years = [2014]
+
+var tiles = [[215,68]]
 
 var cloudCover = 80
 var indexes = ['MNDWI', 'EVI2', 'LAI']
@@ -53,9 +55,6 @@ var max_error = 30
 
 var trainingSamplesNumber = 10000
 var randomForestTrees = 100
-
-var tiles = [[215,68]]
-
 
 
 var featureSpace = [
@@ -171,216 +170,217 @@ var Landsat7 = ee.ImageCollection("LANDSAT/LE07/C01/T1_TOA");
 var Landsat5 = ee.ImageCollection("LANDSAT/LT05/C01/T1_TOA");
 
 
-
-    
-tiles.forEach(function (tile) {
+years.forEach(function (year) {
   
-  var path = tile[0];
-  var row = tile[1];
+  tiles.forEach(function (tile) {
 
-  var roi = gridCollection
-    .filterMetadata('PATH', "equals", path)
-    .filterMetadata('ROW', "equals", row)
-    
-  var geometry = roi.geometry(max_error)
-  var centroid = geometry.centroid(30)
-  
-  Map.centerObject(roi)
+    var path = tile[0];
+    var row = tile[1];
 
-// create Mosaic
+    var roi = gridCollection
+      .filterMetadata('PATH', "equals", path)
+      .filterMetadata('ROW', "equals", row)
 
-  var full_mosaic = [];
+    var geometry = roi.geometry(max_error)
+    var centroid = geometry.centroid(30)
 
-      for (var period in periods) {
-      
-        var dates = periods[period];
-      
-        var startDate = dates[0]
-        var endDate = dates[1]
+    Map.centerObject(roi)
 
-        var collection = ee.ImageCollection(getNormalizedCollection(centroid, startDate, endDate, cloudCover, bands, true))
+  // create Mosaic
 
-        collection = collection.map(get_collection)
-        
-        var mosaic = null
-    
-        var L8Mosaic = getMosaic(filterCollection(collection, 'LANDSAT_8'))
-        var L7Mosaic = getMosaic(filterCollection(collection, 'LANDSAT_7'))
-        var L5Mosaic = getMosaic(filterCollection(collection, 'LANDSAT_5'))
+    var full_mosaic = [];
 
-        if (year >= 2013) {
-          mosaic = L8Mosaic.unmask(L7Mosaic)
-         } else 
-        if (year == 2012) {
-          mosaic = L7Mosaic
-        } else
-        if (year >= 2003 && year < 2012) {
-          mosaic = L5Mosaic.unmask(L7Mosaic)
-        } else
-        if (year >= 2000 && year < 2003) {
-          mosaic = L7Mosaic.unmask(L5Mosaic)
-        } else
-        if (year < 2000) {
-          mosaic = L5Mosaic
+        for (var period in periods) {
+
+          var dates = periods[period];
+
+          var startDate = dates[0]
+          var endDate = dates[1]
+
+          var collection = ee.ImageCollection(getNormalizedCollection(centroid, startDate, endDate, cloudCover, bands, true))
+
+          collection = collection.map(get_collection)
+
+          var mosaic = null
+
+          var L8Mosaic = getMosaic(filterCollection(collection, 'LANDSAT_8'))
+          var L7Mosaic = getMosaic(filterCollection(collection, 'LANDSAT_7'))
+          var L5Mosaic = getMosaic(filterCollection(collection, 'LANDSAT_5'))
+
+          if (year >= 2013) {
+            mosaic = L8Mosaic.unmask(L7Mosaic)
+           } else 
+          if (year == 2012) {
+            mosaic = L7Mosaic
+          } else
+          if (year >= 2003 && year < 2012) {
+            mosaic = L5Mosaic.unmask(L7Mosaic)
+          } else
+          if (year >= 2000 && year < 2003) {
+            mosaic = L7Mosaic.unmask(L5Mosaic)
+          } else
+          if (year < 2000) {
+            mosaic = L5Mosaic
+          }
+
+          mosaic = mosaic.rename(
+          ee
+            .Image(mosaic)
+            .bandNames()
+            .map(function (band) {
+              return ee.String(period).cat("_").cat(band);
+            })
+        );
+
+        full_mosaic.push(mosaic);
+
         }
-       
-        mosaic = mosaic.rename(
-        ee
-          .Image(mosaic)
-          .bandNames()
-          .map(function (band) {
-            return ee.String(period).cat("_").cat(band);
-          })
-      );
-      
-      full_mosaic.push(mosaic);
-      
-      }
-      var final_mosaic = ee.Image.cat(full_mosaic).clip(roi);
+        var final_mosaic = ee.Image.cat(full_mosaic).clip(roi);
 
- 
-  // ============================================================================
-  //                        STRARTIFIED SAMPLING
-  // ============================================================================
-      // Reference map for sampling
-          // **NOTE: the reference map used for MapBiomas forest plantation is not public.
-          //         The MapBiomas classification is used here as an example. 
-      var refMap = ee.Image('projects/mapbiomas-workspace/public/collection6/mapbiomas_collection60_integration_v1')
-                              .select('classification_'+year)
-                              .remap([9], [1]) // Forest Plantation
-                              .updateMask(integrac.unmask().not())
-                              
-      var areaRoi = ee.Number(geometry.area()).divide(1e4)
 
-      var subtile_roi = SubTile.filterBounds(roi)  
+    // ============================================================================
+    //                        STRARTIFIED SAMPLING
+    // ============================================================================
+        // Reference map for sampling
+            // **NOTE: the reference map used for MapBiomas forest plantation is not public.
+            //         The MapBiomas classification is used here as an example. 
+        var reference = ee.Image('projects/mapbiomas-workspace/public/collection6/mapbiomas_collection60_integration_v1')
+                                .select('classification_'+year)
+                                .remap([9], [1]) // Forest Plantation
+                                .updateMask(integrac.unmask().not())
 
-      var reference_roi = refMap.unmask().clip(roi)
+        var areaRoi = ee.Number(geometry.area()).divide(1e4)
 
-      var nonsilv = reference_roi.eq(0)
-      var silv = reference_roi.eq(1)
+        var subtile_roi = SubTile.filterBounds(roi)  
 
-      var silv_area = calcArea(subtile_roi, silv)
-      var nonsilv_area = calcArea(subtile_roi, nonsilv)
+        var reference_roi = reference.unmask().clip(roi)
 
-      var area_silv = silv_area.select(["Id", "sum"], ["Id", "silv"])
-      var area_nonsilv = nonsilv_area.select(["Id", "sum"], ["Id", "others"])
-      
-       /////////////////
-      var sumAreas = subtile_roi.map(function(ft){
-        var id_filter = ee.Filter.eq('Id', ft.get('Id'))
-      
-        ft = ft.set('others', area_nonsilv.filter(id_filter).first().get('others'),
-                  'silv', area_silv.filter(id_filter).first().get('silv')
-        
-                  )
-      
-        return ft.set('total', ft.getNumber('others')
-                        .add(ft.getNumber('silv')))
+        var nonsilv = reference_roi.eq(0)
+        var silv = reference_roi.eq(1)
 
-    })
-    
-  
+        var silv_area = calcArea(subtile_roi, silv)
+        var nonsilv_area = calcArea(subtile_roi, nonsilv)
 
-    /////////////////
-     var percent_area_subtile = sumAreas
-      .map(function (feature) {
-        var feat_silv = feature.set(
-          "percentual_silv",
-          ee
-            .Number(feature.get("silv"))
-            .divide(ee.Number(feature.get("total")))
-            .add(0.10)
-        );
-        var feat_others = feat_silv.set(
-          "percentual_others",
-          ee
-            .Number(feat_silv.get("others"))
-            .divide(ee.Number(feat_silv.get("total")))
-            .subtract(0.10)
-        );
-        var new_total = feat_others.set(
-          "percentual_tile",
-          ee
-            .Number(feat_others.get("total"))
-            .divide(ee.Number(areaRoi))
-        );
-        return new_total;
+        var area_silv = silv_area.select(["Id", "sum"], ["Id", "silv"])
+        var area_nonsilv = nonsilv_area.select(["Id", "sum"], ["Id", "others"])
+
+         /////////////////
+        var sumAreas = subtile_roi.map(function(ft){
+          var id_filter = ee.Filter.eq('Id', ft.get('Id'))
+
+          ft = ft.set('others', area_nonsilv.filter(id_filter).first().get('others'),
+                    'silv', area_silv.filter(id_filter).first().get('silv')
+
+                    )
+
+          return ft.set('total', ft.getNumber('others')
+                          .add(ft.getNumber('silv')))
+
       })
-      
-   
-    
-     // Samples //
 
-    var train = final_mosaic
-      .unmask()
-      .addBands(reference_roi.select([0], ["class"]).unmask());
 
-    var trainingSamples = percent_area_subtile
-      .map(function (subtile) {
-        var areas = ee.Dictionary({
-          others: subtile.get("percentual_others"),
-          silv: subtile.get("percentual_silv"),
-        });
 
-        var trainingSamplesSubTile = ee
-          .Number(trainingSamplesNumber)
-          .multiply(ee.Number(subtile.get("percentual_tile")));
-        var others = ee.Number(areas.get("others"));
-        var silv = ee.Number(areas.get("silv"));
-       
-        var sample = ee.Number(trainingSamplesSubTile);
+      /////////////////
+       var percent_area_subtile = sumAreas
+        .map(function (feature) {
+          var feat_silv = feature.set(
+            "percentual_silv",
+            ee
+              .Number(feature.get("silv"))
+              .divide(ee.Number(feature.get("total")))
+              .add(0.10)
+          );
+          var feat_others = feat_silv.set(
+            "percentual_others",
+            ee
+              .Number(feat_silv.get("others"))
+              .divide(ee.Number(feat_silv.get("total")))
+              .subtract(0.10)
+          );
+          var new_total = feat_others.set(
+            "percentual_tile",
+            ee
+              .Number(feat_others.get("total"))
+              .divide(ee.Number(areaRoi))
+          );
+          return new_total;
+        })
 
-        var samples = train.stratifiedSample({
-          numPoints: 1,
-          classBand: "class",
-          region: subtile.geometry(),
-          scale: 30,
-          seed: 11,
-          classValues: [0, 1],
-          classPoints: [
-            sample.multiply(others).int(),
-            sample.multiply(silv).int(),
-          ],
-          tileScale: 4,
-          geometries: true,
-        });
-        return samples;
+
+
+       // Samples //
+
+      var train = final_mosaic
+        .unmask()
+        .addBands(reference_roi.select([0], ["class"]).unmask());
+
+      var trainingSamples = percent_area_subtile
+        .map(function (subtile) {
+          var areas = ee.Dictionary({
+            others: subtile.get("percentual_others"),
+            silv: subtile.get("percentual_silv"),
+          });
+
+          var trainingSamplesSubTile = ee
+            .Number(trainingSamplesNumber)
+            .multiply(ee.Number(subtile.get("percentual_tile")));
+          var others = ee.Number(areas.get("others"));
+          var silv = ee.Number(areas.get("silv"));
+
+          var sample = ee.Number(trainingSamplesSubTile);
+
+          var samples = train.stratifiedSample({
+            numPoints: 1,
+            classBand: "class",
+            region: subtile.geometry(),
+            scale: 30,
+            seed: 11,
+            classValues: [0, 1],
+            classPoints: [
+              sample.multiply(others).int(),
+              sample.multiply(silv).int(),
+            ],
+            tileScale: 4,
+            geometries: true,
+          });
+          return samples;
+        })
+        .flatten();
+
+      var training = trainingSamples
+
+  // ============================================================================
+  //                                  CLASSIFICATION
+  // ============================================================================
+
+      var classifier = ee.Classifier
+        .smileRandomForest(randomForestTrees)
+        .train(training, 'class', final_mosaic.bandNames());
+
+      var classified = final_mosaic.classify(classifier)
+        .set('year', year)
+        .rename(['classification'])
+
+
+      // Visualization //
+      var filename = year + '_' + path + '_' + row;
+
+      Map.addLayer(final_mosaic, {bands: ['P1_NIR_median', 'P1_SWIR1_median', 'P1_RED_median'], min: 0, max: 5000}, 'Mosaic ' + filename, false);
+      Map.addLayer(classified.selfMask(), {"opacity":1,"bands":["classification"],"min":0,"max":3,"palette":["ffffff","ff826e","16ff7e","5008ff"]}, 'Classification ' + filename, false);
+      Map.addLayer(training, {}, 'Samples ' + filename, false);
+      Map.addLayer(reference_roi.selfMask(),{},'Mapa de Referência '+ filename, false);
+
+      var filename = path+''+row+'_'+year
+
+      // Exporting Results //
+      Export.image.toAsset({
+        image: classified.byte().set('year',year), 
+        description: 'SILVICULTURE_RAW' + filename, 
+        assetId: outputCollection + filename, 
+        region: roi, 
+        scale: 10, 
+        maxPixels: 1.0E13
       })
-      .flatten();
 
-    var training = trainingSamples
-    
-// ============================================================================
-//                                  CLASSIFICATION
-// ============================================================================
-  
-    var classifier = ee.Classifier
-      .smileRandomForest(randomForestTrees)
-      .train(training, 'class', final_mosaic.bandNames());
-    
-    var classified = final_mosaic.classify(classifier)
-      .set('year', year)
-      .rename(['classification'])
-
-
-    // Visualization //
-    var filename = year + '_' + path + '_' + row;
-    
-    Map.addLayer(final_mosaic, {bands: ['P1_NIR_median', 'P1_SWIR1_median', 'P1_RED_median'], min: 0, max: 5000}, 'Mosaic ' + filename, false);
-    Map.addLayer(classified.selfMask(), {"opacity":1,"bands":["classification"],"min":0,"max":3,"palette":["ffffff","ff826e","16ff7e","5008ff"]}, 'Classification ' + filename, false);
-    Map.addLayer(training, {}, 'Samples ' + filename, false);
-    Map.addLayer(reference_roi.selfMask(),{},'Mapa de Referência '+ filename, false);
-   
-    var filename = path+''+row+'_'+year
-   
-    // Exporting Results //
-    Export.image.toAsset({
-      image: classified.byte().set('year',year), 
-      description: 'SILVICULTURE_RAW' + filename, 
-      assetId: outputCollection + filename, 
-      region: roi, 
-      scale: 10, 
-      maxPixels: 1.0E13
-    })
-      
- })
+  })
+})
